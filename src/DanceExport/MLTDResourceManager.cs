@@ -55,13 +55,21 @@ namespace OpenMLTD.DanceExport {
         }
 
         public async Task<byte[]> GetFile(string name) {
-            var asset = NameMapping[name];
+            var file = await GetFileName(name);
+            return file == null ? null : File.ReadAllBytes(file);
+        }
+
+        public async Task<string> GetFileName(string name) {
+            if (!NameMapping.TryGetValue(name, out var asset)) {
+                return null;
+            }
+
             var file = Path.Combine(_data, asset.RemoteName);
             if (!File.Exists(file)) {
                 await DownloadAsset(asset.RemoteName, file);
             }
 
-            return File.ReadAllBytes(file);
+            return file;
         }
 
         private async Task DownloadFile(string url, string path) {

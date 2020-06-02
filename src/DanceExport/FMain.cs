@@ -6,6 +6,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -25,6 +26,9 @@ namespace OpenMLTD.DanceExport {
         private readonly List<IdolSelector> _selectors;
         private readonly List<IdolInfo> _idols = new List<IdolInfo>();
 
+        private volatile bool _closing = false;
+        private Thread _iconLoaderThread;
+
         public FMain() {
             InitializeComponent();
 
@@ -35,6 +39,7 @@ namespace OpenMLTD.DanceExport {
                 };
                 if (c is PictureBox pic) {
                     pic.BorderStyle = BorderStyle.FixedSingle;
+                    pic.SizeMode = PictureBoxSizeMode.Zoom;
                 }
                 if (c is ComboBox cb) {
                     cb.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -71,6 +76,7 @@ namespace OpenMLTD.DanceExport {
             selector.CostumeCombo.Items.Clear();
 
             var idol = _idols[selector.IdolCombo.SelectedIndex];
+            selector.AvatarBox.Image = idol.Icon;
             idol.Costumes.ForEach(costume => { selector.CostumeCombo.Items.Add(costume.Name); });
         }
 
@@ -129,9 +135,13 @@ namespace OpenMLTD.DanceExport {
         #endregion
 
         private void FMain_FormClosing(object sender, FormClosingEventArgs e) {
+            _closing = true;
+
             _config.LastWindow.SetFrom(this);
             var json = JsonConvert.SerializeObject(_config, Formatting.Indented);
             File.WriteAllText(ConfigFile, json);
+
+            _iconLoaderThread?.Join();
         }
 
         private static string PickFolder(string title) {
@@ -160,7 +170,12 @@ namespace OpenMLTD.DanceExport {
             _res = new MLTDResourceManager(_config.CacheFolder, this);
             await _res.Init();
             await Task.Run(InitCostumes);
-            _idols.ForEach(idol => { _selectors.ForEach(selector => { selector.IdolCombo.Items.Add(idol.Name); }); });
+            _idols.ForEach(idol => { _selectors.ForEach(selector => {
+                selector.IdolCombo.Items.Add(idol.Name);
+                selector.IdolCombo.SelectedIndex = 0;
+            }); });
+            _iconLoaderThread = new Thread(IconLoaderThreadWork);
+            _iconLoaderThread.Start();
         }
 
         private void InitCostumes() {
@@ -263,6 +278,71 @@ namespace OpenMLTD.DanceExport {
             logBox.Text = "";
         }
 
+        private void IconLoaderThreadWork() {
+            // load idol icons
+            _idols.ForEach(idol => {
+                if (_closing) {
+                    return;
+                }
+
+                var num = idol.Id.Substring(0, 3);
+                var bundleFile = _res.GetFileName($"chat_icon_{num}.unity3d").Result;
+                if (bundleFile == null) {
+                    return;
+                }
+
+                var icon = GetIcon(bundleFile);
+                if (icon == null) {
+                    return;
+                }
+
+                idol.Icon = icon;
+                Invoke(new Action(() => {
+                    _selectors.ForEach(sel => {
+                        if (_idols[sel.IdolCombo.SelectedIndex].Id == idol.Id) {
+                            sel.AvatarBox.Image = idol.Icon;
+                        }
+                    });
+                }));
+            });
+
+            // TODO: load costume icons
+        }
+
+        private Bitmap GetIcon(string path, bool fixChannels=false) {
+            var manager = new AssetStudio.AssetsManager();
+            manager.LoadFiles(path);
+
+            foreach (var file in manager.assetsFileList) {
+                foreach (var obj in file.Objects) {
+                    if (!(obj is AssetStudio.Sprite sprite)) {
+                        continue;
+                    }
+
+                    var bm = AssetStudio.SpriteHelper.GetImage(sprite);
+                    if (!fixChannels) {
+                        return bm;
+                    }
+
+                    // swap RGBA and BGRA
+                    var bmData = bm.LockBits(new Rectangle(0, 0, bm.Width, bm.Height), System.Drawing.Imaging.ImageLockMode.ReadWrite, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                    var data = new byte[bmData.Stride * bmData.Height];
+                    Marshal.Copy(bmData.Scan0, data, 0, data.Length);
+                    
+                    for (var i = 0; i < data.Length; i += 4) {
+                        var tmp = data[i];
+                        data[i] = data[i + 2];
+                        data[i + 2] = tmp;
+                    }
+                    Marshal.Copy(data, 0, bmData.Scan0, data.Length);
+                    bm.UnlockBits(bmData);
+                    return bm;
+                }
+            }
+
+            return null;
+        }
+
         private class IdolSelector {
             public PictureBox AvatarBox { get; set; }
             public ComboBox IdolCombo { get; set; }
@@ -274,6 +354,7 @@ namespace OpenMLTD.DanceExport {
             public string Name { get; set; }
             public string Id { get; set; }
             public List<CostumeInfo> Costumes { get; set; } = new List<CostumeInfo>();
+            public Bitmap Icon { get; set; }
         }
 
         private class CostumeInfo {

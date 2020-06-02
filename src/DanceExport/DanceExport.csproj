@@ -101,6 +101,14 @@
     <None Include="App.config" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\thirdparty\AssetStudio\AssetStudioUtility\AssetStudioUtility.csproj">
+      <Project>{80aec261-21ee-4e4f-a93b-7a744dc84888}</Project>
+      <Name>AssetStudioUtility</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\..\thirdparty\AssetStudio\AssetStudio\AssetStudio.csproj">
+      <Project>{7662f8c2-7bfd-442e-a948-a43b4f7eb06e}</Project>
+      <Name>AssetStudio</Name>
+    </ProjectReference>
     <ProjectReference Include="..\MiriTore.Common\MiriTore.Common.csproj">
       <Project>{906e225d-7c75-4836-bc90-350547238f4e}</Project>
       <Name>MiriTore.Common</Name>
